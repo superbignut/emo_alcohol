@@ -32,10 +32,10 @@ def power_callback(data): # 可以不断的获取 imu 数据的函数
     # print(x)
 
     if x < 20.0:
-        send_data = "power " + "1 0"  #  1 表示
+        send_data = "power " + "1 0"  #  1 表示 没电了
         time.sleep(2)
     else:
-        send_data = "power " + "0 0"  #  1 表示
+        send_data = "power " + "0 0"  #  0 表示 正常
         time.sleep(2)
     client_socket.sendall(send_data.encode('utf-8'))
             
