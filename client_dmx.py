@@ -57,36 +57,7 @@ def lu_yin_and_save():
     wf.writeframes(b''.join(frames))
     wf.close()
 
-""" def load_and_bo_fang():
-    # -*- coding: utf-8 -*-
 
-
-    # 打开.wav文件
-    wf = wave.open("output.wav", 'rb')
-
-    # 创建PyAudio对象
-    p = pyaudio.PyAudio()
-
-    # 打开音频流
-    stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
-                    channels=wf.getnchannels(),
-                    rate=wf.getframerate(),
-                    output=True)
-
-    # 播放数据
-    data = wf.readframes(1024)
-
-    while data:
-        # print(type(data))
-        stream.write(data)
-        data = wf.readframes(1024)
-
-    # 停止音频流
-    stream.stop_stream()
-    stream.close()
-
-    # 关闭 PyAudio
-    p.terminate() """
 
 def run():
     client_address = ("192.168.1.103", 43897)
@@ -98,7 +69,7 @@ def run():
     # controller.stand_up()
     # pack = struct.pack('<3i', 0x21010202, 0, 0)
     # controller.send(pack) # 起立
-    time.sleep(4)
+    time.sleep(2)
 
     controller.not_move()
 
@@ -125,10 +96,12 @@ def run():
             #     web_text = "大模型没有输出啊。"
             print(web_text)
 
-            data = "dmx " + web_text + " " + str(0)
-            client_socket.sendall(data.encode('utf-8'))
-            # shuo_zhong_wen(web_text)
-            time.sleep(0.1)
+            if web_text == "1" or  web_text == "2" or web_text == "3":
+                print("send")
+                data = "dmx " + web_text + " " + str(0)
+                client_socket.sendall(data.encode('utf-8'))
+                # shuo_zhong_wen(web_text)
+                time.sleep(0.1)
         except:
             time.sleep(0.1)
             continue

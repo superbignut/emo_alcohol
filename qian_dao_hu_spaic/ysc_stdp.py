@@ -15,7 +15,7 @@
 
 
 """
-import collections
+
 import numpy as np
 from tqdm import tqdm
 import os
@@ -27,16 +27,19 @@ import torch.nn.functional as F
 from SPAIC.spaic.Learning.Learner import Learner
 from SPAIC.spaic.Library.Network_saver import network_save
 from SPAIC.spaic.Library.Network_loader import network_load
-from SPAIC.spaic.IO.Dataset import MNIST as dataset
-# from SPAIC.spaic.IO.Dataset import CUSTOM_MNIST, NEW_DATA_MNIST
-# import matplotlib.pyplot as plt
-# from torch.utils.tensorboard import SummaryWriter
+import multiprocessing
 import csv
 import pandas as pd
 from collections import deque
 import traceback
 import threading
 import socket
+from Controller import Controller
+import time
+import subprocess
+import wave
+import pyaudio
+
 
 EMO = {"POSITIVE":0, "NEGATIVE":1, "ANGRY":2} # NULL, 积极，消极，愤怒
 
@@ -72,32 +75,50 @@ run_time = 256 * backend.dt
 time_step = int(run_time / backend.dt)
 
 
+def _bo_fang(index):
+    try:
+        if index == 1:
+            file_name = "wang_wang.wav"
+        elif index == 2:
+            file_name = "woof_sad.wav"
+        # 打开.wav文件
+        file_path = os.path.join(os.path.dirname(__file__), file_name)
+        wf = wave.open(file_path, 'rb')
+
+        # 创建PyAudio对象
+        p = pyaudio.PyAudio()
+
+        # 打开音频流
+        stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
+                        channels=wf.getnchannels(),
+                        rate=wf.getframerate(),
+                        output=True)
+
+        # 播放数据
+        data = wf.readframes(1024)
+
+        
+        while data:
+            stream.write(data)
+            data = wf.readframes(1024)
+
+        # 停止音频流
+        stream.stop_stream()
+        stream.close()
+
+        # 关闭 PyAudio
+        p.terminate()
+        wf.close()
+    except:
+        print("error")
+    finally:
+        print("over")
+
 """
     | 0     1     2    3  |   4    5  |  6    7  |  9      10  |   11    12     13 |     14    15   |   8    |
     | 摸    摸    踢   踢  |  红    蓝 |  酒   酒 |  表扬   批评 |   上    下     挥  |    电低  电低  |   踢打 | 
 """
 
-def ysc_create_data_before_pretrain_new_new():
-    rows = 10000
-    data = []
-    groups = {
-        'ANGRY':    [2, 3, 8],
-        'NEGATIVE': [4, 6, 7, 10, 12, 14, 15], # 这里的一个很大的假设就是,如果一起训练可以消极, 那么单个的输入给进来的时候,希望也是消极的!!!!!!
-        'POSITIVE': [0, 1, 5, 9, 11, 13],
-        }
-    for _ in range(rows):
-        selected_group = random.choice(list(groups.values()))
-        result_list = [0.0] * input_node_num
-        for i in range(input_node_num):
-            if i in selected_group:
-                result_list[i] = 1.0
-            else:
-                result_list[i] = random.uniform(0, 0.2)
-        data.append(result_list * input_num_mul_index)
-    with open('output.csv', mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerows(data)
-    print("CSV文件已保存。")
 
 
 class YscNet(spaic.Network):
@@ -156,7 +177,9 @@ class YscNet(spaic.Network):
             return EMO['POSITIVE']
         
         else:
-            raise NotImplementedError
+            return -1 # 这里对应的就是全是0 的情况
+
+
         
 
     def ysc_pretrain_step(self, data, label=None, reward=1):
@@ -164,7 +187,7 @@ class YscNet(spaic.Network):
         # 保存到buffer中
 
         output = self.step(data, reward=reward)#  reward  一定得是1
-        print(output)
+        # print(output)
         label = self.new_check_label_from_data(data)
         # print(label)
         # print(self.buffer)
@@ -243,7 +266,8 @@ class YscNet(spaic.Network):
         # print(output)
         temp_cnt = [0 for _ in range(len(self.buffer))]     # 四个0
         temp_num = [0 for _ in range(len(self.buffer))]
-        self.assign_label_update()                          # 统计一下每个神经元的归属label
+        if self.assign_label == None:
+            self.assign_label_update()                          # 统计一下每个神经元的归属label
         
         if self.assign_label == None: # 最开始跳过                  
             return 0
@@ -387,6 +411,11 @@ def load_and_test(net:YscNet):
     net.load_weight_and_buffer(model_path="save_200/ysc_model", buffer_path= 'ysc_buffer_200.pth') # 使用 200 轮测试
     net.ysc_load_and_test_pipeline() # 测试数据
 
+"""
+    | 0     1     2    3  |   4    5  |  6    7  |  9      10  |   11    12     13 |     14    15   |   8    |
+    | 摸    摸    踢   踢  |  红    蓝 |  酒   酒 |  表扬   批评 |   上    下     挥  |    电低  电低  |   踢打 | 
+"""
+
 def single_test(net:YscNet):
     net.load_weight_and_buffer(model_path="save_1000/real_ysc_model", buffer_path="real_ysc_buffer_1000.pth") # 加载200的与训练数据
     print(net.assign_label)
@@ -395,7 +424,7 @@ def single_test(net:YscNet):
         t+=1
         result_list = [0.0] * input_node_num_origin
         for i in range(input_node_num_origin):
-            if i == 0 or i ==6 or i == 8 or i == 11 or i==14 or i == 19: # 1 红， 9 10 抚摸
+            if i == 4: # 1 红， 9 10 抚摸
                 result_list[i] = 1.0
             else:
                 result_list[i] = random.uniform(0, 0.2)
@@ -425,7 +454,6 @@ def mic_change(net:YscNet):
     net.emotion_core_mic_change() # 连续微调，看什么时候能反转过来
 
 
-
 class Gouzi:
 
     def __init__(self) -> None:
@@ -447,9 +475,42 @@ class Gouzi:
         
         # single_test(ysc_robot_net)
         # mic_change(ysc_robot_net)
-        self.emo_queue = deque(maxlen=5)
+        self.emo_len = 1
+        self.emo_queue = deque(maxlen=self.emo_len) # -1 是什么也不干， 0 是开心  1 是 不开心  2 是愤怒， 每次 >= 3 才行
+        self.state_update_lock = threading.Lock() # 这个lock 使用来检测 狗的状态的更新的， 在检测线程 和 clear 线程中使用
+
+        self.emo_queue_lock = threading.Lock() # 用来访问 queue 的线程锁
+
+
         self.emo_thread = threading.Thread(target=self.emo_handle_thread, name="emo_handle_thread")
 
+        self.action_thread = threading.Thread(target=self.action_handle_thread, name="action_thread") # 动作线程还没做
+
+        self.controller = None
+        
+        self.action_socket_init() # 初始化controller
+
+        self.last_emotion = None
+        self.temp_emotion = None
+
+        self.is_moving = False
+
+    def action_socket_init(self):
+        # client_address = ("192.168.1.103", 43897)
+        server_address = ("192.168.1.120", 43893)  # 运动主机端口
+        self.controller = Controller(server_address) # 创建 控制器
+
+        self.controller.heart_exchange_init() # 初始化心跳
+        time.sleep(2)
+        self.controller.stand_up()
+        print('stand_up')
+        # pack = struct.pack('<3i', 0x21010202, 0, 0)
+        # controller.send(pack) # 
+        time.sleep(2)
+        self.controller.not_move() # 进入 静止状态
+        print("动作socket初始化")
+
+        
         """
             | 0     1     2    3  |   4    5  |  6    7  |  9      10  |   11    12     13 |     14    15   |   8    |
             | 摸    摸    踢   踢  |  红    蓝 |  酒   酒 |  表扬   批评 |   上    下     挥  |    电低  电低  |   踢打 | 
@@ -465,28 +526,99 @@ class Gouzi:
         # net_thread # 
         #            #
 
-        self.robot_net.load_weight_and_buffer(model_path="save_200/real_ysc_model", buffer_path='real_ysc_buffer_200.pth') # 这里以后还可以换成 其他训练轮数的模型
+        self.robot_net.load_weight_and_buffer(model_path="save_600/real_ysc_model", buffer_path='real_ysc_buffer_600.pth') # 这里以后还可以换成 其他训练轮数的模型
 
         self.emo_thread.start() # 情感线程启动
+
+        self.say_something(index=1)
+
+        self.action_thread.start() # 启动 运动执行模块
+
+        print("into server")
+        self.start_server() # 启动监听线程 ， 线程中不断 获取  下面不要写东西
+
         
-        self.start_server() # 启动监听线程 ， 线程中不断 获取
+
+        
+
+        # 启动一个 汪汪叫的 进程
+    def say_something(self, index):    
+            
+            # temp_p = multiprocessing.Process(target=_bo_fang, args=(index, ))
+            temp_t = threading.Thread(target=_bo_fang, name="bo_fang_thread", args=(index, ))
+            temp_t.start() # 这里 因为麦克风是 io 且是独占的，所有 多线程可以加速， 并且 需要join
+            temp_t.join()
+            # _bo_fang(index=index)
+            print("播放结束")
     
+    # 这里可以单独启动一个线程 ，如果某个状态 一直不变，那么就置零
+
+
+
+
+    def action_handle_thread(self):
+        # thresh_hold = self.emo_len // 2 + 1 
+        # 只有全都是一个情感的时候，才会正确的输出
+        
+        while True:
+            with self.emo_queue_lock:
+                if self.emo_queue.count(EMO['POSITIVE']) == self.emo_len:
+                    
+                    self.temp_emotion = EMO['POSITIVE']
+
+                    if self.temp_emotion != self.last_emotion:
+                        self.controller.zuo_you_huang()
+                        time.sleep(4)
+                        self.controller.thread_active = False
+
+                elif self.emo_queue.count(EMO["NEGATIVE"])  == self.emo_len or self.emo_queue.count(EMO["ANGRY"])  == self.emo_len:
+                    self.temp_emotion = EMO['NEGATIVE']
+                    if self.temp_emotion != self.last_emotion:
+                        self.controller.hou_tui_2s()
+                        self.controller.di_tou()
+                        self.say_something(index=2)
+                        
+                        time.sleep(2)
+                        self.controller.thread_active = False
+
+                    """ elif self.emo_queue.count(EMO["ANGRY"])  == self.emo_len:
+                    self.temp_emotion = EMO['ANGRY']
+                    if self.temp_emotion != self.last_emotion:
+                        self.say_something(index=1) """
+                else:
+                    time.sleep(0.1)
+                self.last_emotion = self.temp_emotion
+
+                
+
+
+    
+    def clear(self):
+        with self.state_update_lock:
+            self.imu = 0
+            self.color = 0
+            self.alcohol = 0
+            self.dmx = 0
+            self.gesture = 0
+            self.power = 0
 
     def emo_handle_thread(self):
-
+        # 这里只要状态使用过一次之后 ， 就会被 置零
         while True:
             # 这个线程负责 把 输入转换为模型的输入， 然后 给出情感输出， 放到 self.deque 之中
-            temp_input = [0 for _ in range(20)]
+            temp_input = [0 for _ in range(input_node_num_origin)]
 
 
             ######################## 这里需要通过对
             if self.imu == 1:
                 temp_input[0] = 1 # 摸
                 temp_input[1] = 1
+                
             elif self.imu == 2:
                 temp_input[2] = 1 # 踢
                 temp_input[3] = 1
                 temp_input[8] = 1
+            
 
             if self.color == 2:
                 temp_input[4] = 1 # 红
@@ -519,15 +651,31 @@ class Gouzi:
                 temp_input[15] = 1
             
             
-
+            if sum(temp_input) < 1:
+                # self.emo_queue.append(-1)  #  输入全是0  就 -1 就ok 
+                # self.emo_queue_add_in_lock(-1) # 
+                # print("sum is : ",sum(temp_input), "no emotion!")
+                # 如果 没有输入 这里也没有输出
+                continue 
             ########################
             print("input is : ", temp_input)
+            self.clear() # 清除状态
             # 
             temp_input = torch.tensor(temp_input * input_num_mul_index, device=device).unsqueeze(0) # 增加了一个维度  
             temp_predict = self.robot_net.ysc_pretrain_step_and_predict(data=temp_input, reward=0) # 返回预测结果 # 暂时不让有变化
+            
             real_label = self.robot_net.new_check_label_from_data(temp_input)
-            print("predict: ", temp_predict, "real: ", real_label)
-        
+            self.emo_queue_add_in_lock(temp_predict) # 这里提前加入
+
+            # self.emo_queue.append(temp_predict) # 1 2 3  开心 难过 愤怒
+            
+
+            print("predict_label is: ", temp_predict, "real_label is: ", real_label)
+            
+
+    def emo_queue_add_in_lock(self, data):
+        with self.emo_queue_lock:
+            self.emo_queue.append(data)
 
     def handle_client_thread(self, client_socket):
         # 处理线程
@@ -551,64 +699,65 @@ class Gouzi:
                         self.gesture = 0 # 0 1 2 3 无  上，下，挥手              4
                         self.power = 0 # 0 1 # 20% 以下， 和以上的电量           2
                 """
-                if command == "gesture":
-                    if args1 == 4: #  nice 表扬 手势
-                        self.gesture = 1
-                        print("up_gesture")
-                    elif args1 == 5: #  批评手势
-                        print("down_gesture") 
-                        self.gesture = 2
-                    elif args1 == 1: # 手掌手势
-                        print("hello_gesture") 
-                        self.gesture = 3
-                    else:
-                        self.gesture = 0
+                with self.state_update_lock:  # 修改状态 上锁
+                    if command == "gesture":
+                        if args1 == 4: #  nice 表扬 手势
+                            self.gesture = 1
+                            print("up_gesture")
+                        elif args1 == 5: #  批评手势
+                            print("down_gesture") 
+                            self.gesture = 2
+                        elif args1 == 1: # 手掌手势
+                            print("hello_gesture") 
+                            self.gesture = 3
+                        else:
+                            self.gesture = 0
 
 
-                elif command == "imu":
-                    if args1 == 1: # 抚摸
-                        print("touching_imu")
-                        self.imu = 1
-                    elif args1 == 2: # 敲打
-                        print("was kicked_imu")
-                        self.imu = 2
-                    else:
-                        self.imu = 0
+                    elif command == "imu":
+                        if args1 == 1: # 抚摸
+                            print("touching_imu")
+                            self.imu = 1
+                        elif args1 == 2: # 敲打
+                            print("was kicked_imu")
+                            self.imu = 2
+                        else:
+                            self.imu = 0
 
 
-                elif command == "color":
-                    if args1 == 1:
-                        print("red_color")
-                        self.color = 2 
-                    else:
-                        self.color = 0
+                    elif command == "color":
+                        if args1 == 1:
+                            print("red_color")
+                            self.color = 2 
+                        else:
+                            self.color = 0
 
 
-                elif command == "alco":
-                    if args1 == 1:
-                        print("drink_alco")
-                        self.alcohol = 1
-                    else:
-                        self.alcohol = 0
+                    elif command == "alco":
+                        if args1 == 1:
+                            print("drink_alco")
+                            self.alcohol = 1
+                        else:
+                            self.alcohol = 0
 
 
-                elif command == "dmx":
-                    if args1 == 1:
-                        print("biao_yang_dmx")
-                        self.dmx = 1
-                    elif args1 == 2:
-                        print("pi_ping_dmx")
-                        self.dmx = 2 
-                    elif args1 == 3:
-                        print("nothing_dmx")
-                        self.dmx = 3
+                    elif command == "dmx":
+                        if args1 == 1:
+                            print("biao_yang_dmx")
+                            self.dmx = 1
+                        elif args1 == 2:
+                            print("pi_ping_dmx")
+                            self.dmx = 2 
+                        elif args1 == 3:
+                            print("nothing_dmx")
+                            self.dmx = 3
 
 
-                elif command == "power":
-                    if args1 == 1:
-                        self.power = 1
-                    else:
-                        self.power = 0 # 正常
+                    elif command == "power":
+                        if args1 == 1:
+                            self.power = 1
+                        else:
+                            self.power = 0 # 正常
                     
 
         except:
@@ -648,5 +797,6 @@ if __name__ == "__main__":
     # Todo
     """
         接下来的任务就是要把，所有的输入平滑掉， 并结合成 动作输出
-    
+
+        不不不 首先还是要在狗上先把 single test 测试一下
     """

@@ -8,7 +8,7 @@ import subprocess
 import time
 import rospy
 from sensor_msgs.msg import Imu
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Int32
 from collections import deque 
 import socket
 import os
@@ -42,43 +42,52 @@ client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect((host, socket_port))
 
 
-def imu_callback(data): # 可以不断的获取 imu 数据的函数
+is_static = True
+def imu_callback(data, index): # 可以不断的获取 imu 数据的函数
     # 发布 x 值
-    global current_time, last_trigger_time, trigger_duration, client_socket
-    x = data.linear_acceleration.x;
-    y = data.linear_acceleration.y;
-    z = data.linear_acceleration.z;
+    global last_trigger_time, current_time, trigger_duration, is_static, client_socket
     
-    x_buffer.append(abs(x)) # 都取正
-    y_buffer.append(abs(y))
+    if index == 2:
+        if data.data == 1 or data.data == 6:
+            is_static = True
+        else:
+            is_static = False
 
-    temp_average_x = sum(x_buffer) / len(x_buffer)
-    temp_average_y = sum(y_buffer) / len(y_buffer)
+    if index == 1 and is_static == True:
+        x = data.linear_acceleration.x;
+        y = data.linear_acceleration.y;
+        z = data.linear_acceleration.z;
+        
+        x_buffer.append(abs(x)) # 都取正
+        y_buffer.append(abs(y))
 
-    imu_x_publisher.publish(temp_average_x)
-    imu_y_publisher.publish(temp_average_y)
+        temp_average_x = sum(x_buffer) / len(x_buffer)
+        temp_average_y = sum(y_buffer) / len(y_buffer)
 
-    current_time = time.time()
+        imu_x_publisher.publish(temp_average_x)
+        imu_y_publisher.publish(temp_average_y)
 
-    if current_time - last_trigger_time > trigger_duration: #  限制了触发间隔
-        if abs(abs(z)-9.8) > 2:
-            print("有坏人，快跑!!!")
-            # shuo_zhong_wen("有坏人，快跑？")
-            print("")
-            last_trigger_time = current_time
-            # subprocess.Popen("/home/ysc/.pyenv/shims/python3 /home/ysc/ltl/youhuairen_kuaipao.py", shell=True)
+        current_time = time.time()
 
-            data = "imu " + "2 0"  # 2 敲打
-            client_socket.sendall(data.encode('utf-8'))
-            
-        elif temp_average_x > 1.2 or temp_average_y > 1.4: # 这里的 坐下的时候， 加速度还要重新标定
-            print("there is a touching !!")
-            #shuo_zhong_wen("是谁在摸我？")
-            last_trigger_time = current_time
-            # subprocess.Popen("/home/ysc/.pyenv/shims/python3 /home/ysc/ltl/shishei_zaimowo.py", shell=True)
+        if current_time - last_trigger_time > trigger_duration: #  限制了触发间隔
+            if abs(abs(z)-9.8) > 2:
+                print("有坏人，快跑!!!")
+                # shuo_zhong_wen("有坏人，快跑？")
+                print("")
+                last_trigger_time = current_time
+                # subprocess.Popen("/home/ysc/.pyenv/shims/python3 /home/ysc/ltl/youhuairen_kuaipao.py", shell=True)
 
-            data = "imu " + "1 0"  #  1 表示 抚摸
-            client_socket.sendall(data.encode('utf-8'))
+                data = "imu " + "2 0"  # 2 敲打
+                client_socket.sendall(data.encode('utf-8'))
+                
+            elif temp_average_x > 1.2 or temp_average_y > 1.4: # 这里的 坐下的时候， 加速度还要重新标定
+                print("there is a touching !!")
+                #shuo_zhong_wen("是谁在摸我？")
+                last_trigger_time = current_time
+                # subprocess.Popen("/home/ysc/.pyenv/shims/python3 /home/ysc/ltl/shishei_zaimowo.py", shell=True)
+
+                data = "imu " + "1 0"  #  1 表示 抚摸
+                client_socket.sendall(data.encode('utf-8'))
             
     
 
@@ -87,7 +96,8 @@ def imu_listener():
     rospy.init_node('shack_check_listener', anonymous=True)
 
     # 订阅 /imu/data 主题
-    rospy.Subscriber('/imu/data', Imu, imu_callback)
+    rospy.Subscriber('/imu/data', Imu, lambda data: imu_callback(data, 1))
+    rospy.Subscriber('/ltl_state', Int32, lambda data: imu_callback(data, 2))
 
     # 循环等待回调
     rospy.spin()
