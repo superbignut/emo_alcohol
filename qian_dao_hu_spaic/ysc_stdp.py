@@ -70,7 +70,7 @@ bat_size = 1
 backend = spaic.Torch_Backend(device)
 backend.dt = 0.1
 
-run_time = 256 * backend.dt 
+run_time = 256 * backend.dt  # runtime 能不能小一点呢， 也需要测试一下吧
 
 time_step = int(run_time / backend.dt)
 
@@ -188,11 +188,12 @@ class YscNet(spaic.Network):
 
         output = self.step(data, reward=reward)#  reward  一定得是1
         # print(output)
-        label = self.new_check_label_from_data(data)
-        # print(label)
-        # print(self.buffer)
-        # print(output.shape)
-        self.buffer[label].append(output)
+        if label == None: # 这个是预训练的时候， label 是空的，所以用 真实label 就可以了， 但是在线学习的时候的label 是 根据实际情况传进去的
+            label = self.new_check_label_from_data(data)
+            self.buffer[label].append(output)
+        else:
+            self.buffer[label].append(output)
+            self.assign_label_update() # 更新标签 ，用于在线学习
         # print(self.buffer)
         # print(label, " buffer len is ",len(self.buffer[label]))
         return output
@@ -260,9 +261,11 @@ class YscNet(spaic.Network):
 
         self.assign_label_update() # 对结果进行统计，并保存到self.assign_label中
 
-    def ysc_pretrain_step_and_predict(self, data, reward=1):
+    def ysc_pretrain_step_and_predict(self, data, label=None, reward=1): # label 用于 在线学习
+        # 如果 label 是None 则是用 函数的真实label也就是预训练的label， 但是如果不是none， 也就是根据交互结果
+        # 传入的label 来更新 assign 和 buffer， 那么就是 在线学习了
         
-        output = self.ysc_pretrain_step(data=data, reward=reward)          # 预训练 时间步
+        output = self.ysc_pretrain_step(data=data, reward=reward, label=label)          # 预训练 时间步
         # print(output)
         temp_cnt = [0 for _ in range(len(self.buffer))]     # 四个0
         temp_num = [0 for _ in range(len(self.buffer))]
@@ -283,16 +286,17 @@ class YscNet(spaic.Network):
         # tensor 保证除法可以 分别相除
         # 这里其实应该 比较的是 去掉0 之后的平均值, 或者是 去掉 一个阈值以下的 值得平均值, 但要是所有得都是1 那就 没有必要了
                     
-        return predict_label # 返回预测label
+        return predict_label# , output # 返回预测label, 这里又多加了一个 输出， 可能有很多都要相应的修改
 
         
 
     def assign_label_update(self, newoutput=None, newlabel=None, weight=0):
         # 如果没有新的数据输入，则就是对 assign_label 进行一次计算，否则 会根据权重插入新数据，进而计算
+        print("there is a assign")
         if newoutput != None:
             self.buffer[newlabel].append(newoutput)
         try:
-            avg_buffer = [sum(self.buffer[i][-400:]) / len(self.buffer[i][-400:]) for i in range(len(self.buffer))] # sum_buffer 是一个求和之后 取平均的tensor  n * 1 * 100
+            avg_buffer = [sum(self.buffer[i][-15:]) / len(self.buffer[i][-15:]) for i in range(len(self.buffer))] # sum_buffer 是一个求和之后 取平均的tensor  n * 1 * 100
             # 这里不如改成 200 试一下
             # 这里可以只使用 后面的数据进行统计  比如[-300:]
             # avg_buffer = [sum_buffer[i] / len(agent.buffer[i]) for i in range(len(agent.buffer))]
@@ -537,10 +541,6 @@ class Gouzi:
         print("into server")
         self.start_server() # 启动监听线程 ， 线程中不断 获取  下面不要写东西
 
-        
-
-        
-
         # 启动一个 汪汪叫的 进程
     def say_something(self, index):    
             
@@ -555,31 +555,60 @@ class Gouzi:
 
 
 
-
     def action_handle_thread(self):
         # thresh_hold = self.emo_len // 2 + 1 
-        # 只有全都是一个情感的时候，才会正确的输出
-        
+        # 只有全都是一个情感的时候，才会正确的输出, 并且，要考虑要不要 执行完之后， 把这个情感 给 pop出去
+        # 这个线程版本做的是：
+        """
+            开心的时候， 左右晃晃，不开心的时候， 回退，唧唧歪歪，低头，
+            然后又加了 moving的全局标志位 和popleft 所以可以连续 一个状态
+        """
         while True:
             with self.emo_queue_lock:
                 if self.emo_queue.count(EMO['POSITIVE']) == self.emo_len:
                     
                     self.temp_emotion = EMO['POSITIVE']
 
-                    if self.temp_emotion != self.last_emotion:
-                        self.controller.zuo_you_huang()
-                        time.sleep(4)
-                        self.controller.thread_active = False
+                    # if self.temp_emotion != self.last_emotion:
+
+                    #########################################
+                    self.is_moving = True
+                    #########################################
+
+
+                    self.controller.zuo_you_huang()
+                    time.sleep(4)
+                    self.controller.thread_active = False
+
+                    #########################################
+                    # 执行完所有动作后
+                    self.emo_queue.popleft()
+                    self.is_moving = False
+                    #
+                    ########################################
 
                 elif self.emo_queue.count(EMO["NEGATIVE"])  == self.emo_len or self.emo_queue.count(EMO["ANGRY"])  == self.emo_len:
                     self.temp_emotion = EMO['NEGATIVE']
-                    if self.temp_emotion != self.last_emotion:
-                        self.controller.hou_tui_2s()
-                        self.controller.di_tou()
-                        self.say_something(index=2)
+                    # if self.temp_emotion != self.last_emotion:  # 这个的加入 可以保证 两次的情感不是同一个
                         
-                        time.sleep(2)
-                        self.controller.thread_active = False
+                    #########################################
+                    self.is_moving = True
+                    #########################################
+
+                    # self.controller.hou_tui_2s()
+                    self.controller.di_tou()
+                    self.say_something(index=2)
+                    time.sleep(2)
+                    self.controller.thread_active = False
+
+                    #########################################
+                    # 执行完所有动作后
+                    self.emo_queue.popleft()
+                    self.is_moving = False
+                    #
+                    ########################################
+                        
+
 
                     """ elif self.emo_queue.count(EMO["ANGRY"])  == self.emo_len:
                     self.temp_emotion = EMO['ANGRY']
@@ -589,7 +618,70 @@ class Gouzi:
                     time.sleep(0.1)
                 self.last_emotion = self.temp_emotion
 
-                
+    def action_handle_thread_red_back(self):
+        # thresh_hold = self.emo_len // 2 + 1 
+        # 只有全都是一个情感的时候，才会正确的输出, 并且，要考虑要不要 执行完之后， 把这个情感 给 pop出去
+        # 这个线程版本做的是：
+        """
+            开心的时候， 左右晃晃，不开心的时候， 回退，唧唧歪歪，低头，
+            然后又加了 moving的全局标志位 和popleft 所以可以连续 一个状态
+        """
+        return  # 这个是备份函数
+        while True:
+            with self.emo_queue_lock:
+                if self.emo_queue.count(EMO['POSITIVE']) == self.emo_len:
+                    
+                    self.temp_emotion = EMO['POSITIVE']
+
+                    # if self.temp_emotion != self.last_emotion:
+
+                    #########################################
+                    self.is_moving = True
+                    #########################################
+
+
+                    self.controller.zuo_you_huang()
+                    time.sleep(4)
+                    self.controller.thread_active = False
+
+                    #########################################
+                    # 执行完所有动作后
+                    self.emo_queue.popleft()
+                    self.is_moving = False
+                    #
+                    ########################################
+
+                elif self.emo_queue.count(EMO["NEGATIVE"])  == self.emo_len or self.emo_queue.count(EMO["ANGRY"])  == self.emo_len:
+                    self.temp_emotion = EMO['NEGATIVE']
+                    # if self.temp_emotion != self.last_emotion:  # 这个的加入 可以保证 两次的情感不是同一个
+                        
+                    #########################################
+                    self.is_moving = True
+                    #########################################
+
+                    self.controller.hou_tui_2s()
+                    self.controller.di_tou()
+                    self.say_something(index=2)
+                    time.sleep(2)
+                    self.controller.thread_active = False
+
+                    #########################################
+                    # 执行完所有动作后
+                    self.emo_queue.popleft()
+                    self.is_moving = False
+                    #
+                    ########################################
+                        
+
+
+                    """ elif self.emo_queue.count(EMO["ANGRY"])  == self.emo_len:
+                    self.temp_emotion = EMO['ANGRY']
+                    if self.temp_emotion != self.last_emotion:
+                        self.say_something(index=1) """
+                else:
+                    time.sleep(0.1)
+                self.last_emotion = self.temp_emotion
+
 
 
     
@@ -602,6 +694,7 @@ class Gouzi:
             self.gesture = 0
             self.power = 0
 
+        
     def emo_handle_thread(self):
         # 这里只要状态使用过一次之后 ， 就会被 置零
         while True:
@@ -610,16 +703,9 @@ class Gouzi:
 
 
             ######################## 这里需要通过对
-            if self.imu == 1:
-                temp_input[0] = 1 # 摸
-                temp_input[1] = 1
-                
-            elif self.imu == 2:
-                temp_input[2] = 1 # 踢
-                temp_input[3] = 1
-                temp_input[8] = 1
-            
 
+            
+            
             if self.color == 2:
                 temp_input[4] = 1 # 红
             
@@ -651,26 +737,70 @@ class Gouzi:
                 temp_input[15] = 1
             
             
-            if sum(temp_input) < 1:
-                # self.emo_queue.append(-1)  #  输入全是0  就 -1 就ok 
-                # self.emo_queue_add_in_lock(-1) # 
-                # print("sum is : ",sum(temp_input), "no emotion!")
-                # 如果 没有输入 这里也没有输出
+            # 如果没有输入 直接跳过
+            # 如果有输入 但是正在运动，清空后跳过
+            
+            if self.is_moving: # 如果正在运动，也是不进行前向传播
+                self.clear()
                 continue 
-            ########################
-            print("input is : ", temp_input)
-            self.clear() # 清除状态
-            # 
+            else:                
+                # 这里打算等待imu 等待 1 秒钟， 如果有imu 交互输入 就 在线学习， 否则就 正常推理
+                start_time = time.time()
+
+                while time.time() - start_time < 1: # 持续检测1s中的imu
+                    if self.imu == 1:
+                        temp_input[0] = 1 # 摸
+                        temp_input[1] = 1
+                        break
+                        
+                    elif self.imu == 2:
+                        temp_input[2] = 1 # 踢
+                        temp_input[3] = 1
+                        temp_input[8] = 1
+                        break
+                    time.sleep(0.1)  # 每 0.1 秒检测一次
+                if sum(temp_input) < 1:
+                    # self.emo_queue.append(-1)  #  输入全是0  就 -1 就ok 
+                    # self.emo_queue_add_in_lock(-1) # 
+                    # print("sum is : ",sum(temp_input), "no emotion!")
+                    # 如果 没有输入 这里也没有输出
+                    continue 
+                print("input is : ", temp_input) # 有输入的情况
+                self.clear() # 清除状态
+            
+            # 这个就是最平常的 推理
+            
+            
+            # 这个 ysc_pretrain_step_and_predict有一个 label 标签，如果传入label 会被视为在线学习
+
+            # 所以当下的设计就是 01  抚摸  238 踢打 用作在线学习的 真实label
+            # if 
+            """             if temp_input[0] == 1 or temp_input[1]== 1:
+                real_label=EMO["POSITIVE"]# 返回预测结果 # 暂时不让有变化
+                print("在线学习了， positive")
+                temp_input = torch.tensor(temp_input * input_num_mul_index, device=device).unsqueeze(0) # 增加了一个维度  
+                temp_predict = self.robot_net.ysc_pretrain_step_and_predict(data=temp_input, reward=0, label=real_label) # 返回预测结果 # 暂时不让有变化
+                # 这里可以不update
+                
+            elif temp_input[2] == 1 or temp_input[3]== 1 or temp_input[8]== 1:
+                real_label=EMO['NEGATIVE']# 返回预测结果 # 暂时不让有变化
+                print("在线学习了， negative")
+                temp_input = torch.tensor(temp_input * input_num_mul_index, device=device).unsqueeze(0) # 增加了一个维度  
+                temp_predict = self.robot_net.ysc_pretrain_step_and_predict(data=temp_input, reward=0, label=real_label) # 返回预测结果 # 暂时不让有变化
+                # 这里可以不update """
+
+            # 在线学习的逻辑还得再缕一缕， 说不定是 reward 的原因，也说不定是需要进行回放？
+            # 可能得在电脑上先用 single test 做一下测试， 再去狗子上进行测试会好些
             temp_input = torch.tensor(temp_input * input_num_mul_index, device=device).unsqueeze(0) # 增加了一个维度  
-            temp_predict = self.robot_net.ysc_pretrain_step_and_predict(data=temp_input, reward=0) # 返回预测结果 # 暂时不让有变化
-            
-            real_label = self.robot_net.new_check_label_from_data(temp_input)
+            # real_label = self.robot_net.new_check_label_from_data(temp_input) # 这里先不打印了， 基本是 正确的
+            temp_predict = self.robot_net.ysc_pretrain_step_and_predict(data=temp_input, reward=0, label=None) # 返回预测结果 # 暂时不让有变化
+
+            print("temp_predict already!") 
+
+
             self.emo_queue_add_in_lock(temp_predict) # 这里提前加入
-
-            # self.emo_queue.append(temp_predict) # 1 2 3  开心 难过 愤怒
-            
-
-            print("predict_label is: ", temp_predict, "real_label is: ", real_label)
+                
+            print("predict_label is: ", temp_predict, "real_label is: ")
             
 
     def emo_queue_add_in_lock(self, data):
@@ -722,7 +852,7 @@ class Gouzi:
                             print("was kicked_imu")
                             self.imu = 2
                         else:
-                            self.imu = 0
+                            self.imu = 0 
 
 
                     elif command == "color":

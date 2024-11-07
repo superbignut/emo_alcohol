@@ -21,7 +21,10 @@ class Controller:
     def change_damoxing_flag(self):
         self.damoxing_flag = False # 先
         time.sleep(0.1)
-        self.damoxing_flag = True        
+        self.damoxing_flag = True    
+
+    
+
 
     def heart_exchange_init(self):
         # start to exchange heartbeat pack
@@ -117,7 +120,6 @@ class Controller:
     def do_move(self):
         self.move_mode = True
         self.send(struct.pack('<3i', 0x21010D06, 0, 0))
-        # time.sleep(0.1)
         self.send(struct.pack('<3i', 0x21010D06, 0, 0))
         
 
@@ -129,20 +131,35 @@ class Controller:
             print("开始摇摆")
             while self.thread_active:
                 if not self.move_mode: # 不是运动模式
-                    pack = struct.pack('<3i', 0x21010130, 15000, 0)
+                    pack = struct.pack('<3i', 0x21010130, 13000, 0)
                     self.send(pack) # 
                     time.sleep(0.3)
-                    pack = struct.pack('<3i', 0x21010130, -15000, 0)
+                    pack = struct.pack('<3i', 0x21010130, -13000, 0)
                     self.send(pack) # 
                     time.sleep(0.3)    
                 else:
-                    pack = struct.pack('<3i', 0x21010130, 6554, 0)
+                    pack = struct.pack('<3i', 0x21010130, 7000, 0)
                     self.send(pack) # 
                     time.sleep(0.3)
 
         temp_thread = threading.Thread(target=temp_func, name="temp_func_in_fuyang")
         temp_thread.start()
-
+    
+    def low_height_of_dog(self):
+        self.thread_active = False # 先关闭， 也就是把其他线程关掉
+        time.sleep(0.1)
+        self.thread_active = True # 再开启
+        def temp_func():
+            print("降低")
+            while self.thread_active:
+                if not self.move_mode: # 不是运动模式
+                    pack = struct.pack('<3i', 0x21010102, -28000, 0)
+                    self.send(pack) # 
+                    time.sleep(0.3)
+        pack = struct.pack('<3i', 0x21010102, 0, 0)
+        self.send(pack) # 回复初始高度
+        temp_thread = threading.Thread(target=temp_func, name="temp_func_gaodu")
+        temp_thread.start()
 
     def zuo_you_huang(self):
         self.thread_active = False # 先关闭， 也就是把其他线程关掉
@@ -161,6 +178,26 @@ class Controller:
 
         temp_thread = threading.Thread(target=temp_func, name="temp_func_in_zuoyou")
         temp_thread.start()
+
+    def pian_hang(self):
+        self.thread_active = False # 先关闭， 也就是把其他线程关掉
+        time.sleep(0.1)
+        self.thread_active = True # 再开启
+        def temp_func():
+            print("开始摇摆")
+            while self.thread_active:
+                if not self.move_mode: # 不是运动模式
+                    pack = struct.pack('<3i', 0x21010135, 15000, 0)
+                    self.send(pack) # 
+                    time.sleep(0.3)
+                    pack = struct.pack('<3i', 0x21010135, -15000, 0)
+                    self.send(pack) # 
+                    time.sleep(0.3)    
+
+        temp_thread = threading.Thread(target=temp_func, name="temp_func_in_pianhang")
+        temp_thread.start()
+
+
 
     def light_eyes(self):
         if self.last_ges != "stand": # 必须得在 stand的前提下才行
@@ -198,6 +235,8 @@ class Controller:
                 if i> 14:  # i = 14 的时候正好可以 做两组
                     break
             # self.stand_up()
+
+
                 
         temp_thread = threading.Thread(target=_hello)
         temp_thread.start()

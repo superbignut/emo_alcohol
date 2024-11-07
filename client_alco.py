@@ -44,7 +44,6 @@ def send_data_thread(host='192.168.1.103', socket_port=12345):
                     a = ord(parsed_values[4]) * 256 + ord(parsed_values[5])
                     b = ord(parsed_values[6]) * 256 + ord(parsed_values[7])
 
-                    
                     print a
 
                     if a - last_a >=200:

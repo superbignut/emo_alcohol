@@ -80,7 +80,7 @@ def imu_callback(data, index): # 可以不断的获取 imu 数据的函数
                 data = "imu " + "2 0"  # 2 敲打
                 client_socket.sendall(data.encode('utf-8'))
                 
-            elif temp_average_x > 1.2 or temp_average_y > 1.4: # 这里的 坐下的时候， 加速度还要重新标定
+            elif temp_average_x > 1.0 or temp_average_y > 1.2: # 这里的 坐下的时候， 加速度还要重新标定以前是1.2和1.4
                 print("there is a touching !!")
                 #shuo_zhong_wen("是谁在摸我？")
                 last_trigger_time = current_time
@@ -97,7 +97,7 @@ def imu_listener():
 
     # 订阅 /imu/data 主题
     rospy.Subscriber('/imu/data', Imu, lambda data: imu_callback(data, 1))
-    rospy.Subscriber('/ltl_state', Int32, lambda data: imu_callback(data, 2))
+    rospy.Subscriber('/ltl_robot_basic_states', Int32, lambda data: imu_callback(data, 2))
 
     # 循环等待回调
     rospy.spin()
